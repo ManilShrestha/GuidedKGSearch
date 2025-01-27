@@ -20,6 +20,95 @@ class EnhancedMedicalKGExtractor:
         # Cache for entity labels and descriptions
         self.entity_metadata = {}
         
+        # Important medical condition properties
+        self.medical_properties = {
+            'P31': 'instance of',
+            'P279': 'subclass of',
+            'P780': 'symptoms',
+            'P828': 'has cause',
+            'P927': 'anatomical location',
+            'P2176': 'drug used for treatment',
+            'P1050': 'medical condition',
+            'P1995': 'health specialty',
+            'P2293': 'genetic association',
+            'P1542': 'has effect',
+            'P1060': 'pathogen transmission process',
+            'P780': 'symptoms',
+            'P2849': 'produced by',
+            'P2176': 'drug used for treatment',
+            'P2175': 'medical condition treated',
+            'P3489': 'pregnancy category',
+            'P3433': 'biological pathway',
+            'P3781': 'has active ingredient'
+        }
+
+        self.seed_conditions = {
+            'Q199804': 'Asthma',
+            'Q199766': 'Chronic obstructive pulmonary disease',
+            'Q623067': 'Emphysema',
+            'Q1496829': 'Chronic bronchitis',
+            'Q1397391': 'Bronchiectasis'
+        }
+        
+    def get_related_conditions(self, base_conditions: Dict[str, str]) -> List[str]:
+        """
+        Get additional related conditions from base COPD conditions with enhanced metadata
+        """
+        query = """
+        PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+        PREFIX wd: <http://www.wikidata.org/entity/>
+        SELECT DISTINCT ?condition ?conditionLabel ?conditionDescription WHERE {
+          VALUES ?base { %s }
+          ?condition wdt:P31 wd:Q12136 .  # instance of disease
+          {
+            ?condition wdt:P279+ ?base .  # subclass of base condition
+          } UNION {
+            ?condition wdt:P828 ?base .   # has cause base condition
+          } UNION {
+            ?condition wdt:P1050 ?base .  # medical condition related
+          }
+          SERVICE wikibase:label { 
+            bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en".
+            ?condition rdfs:label ?conditionLabel .
+            OPTIONAL { ?condition schema:description ?conditionDescription . }
+          }
+        }
+        LIMIT 50
+        """ % ' '.join(f"wd:{qid}" for qid in base_conditions.keys())
+        
+        try:
+            self.sparql.setQuery(query)
+            results = self.sparql.query().convert()
+            
+            conditions = []
+            for result in results["results"]["bindings"]:
+                if "condition" in result:
+                    condition_uri = result["condition"]["value"]
+                    condition_id = condition_uri.split('/')[-1]
+                    
+                    # Store metadata in cache
+                    self.entity_metadata[condition_id] = {
+                        'label': result.get("conditionLabel", {}).get("value", ""),
+                        'description': result.get("conditionDescription", {}).get("value", "")
+                    }
+                    
+                    conditions.append(condition_id)
+            
+            print(f"Found {len(conditions)} related conditions")
+            return conditions
+            
+        except Exception as e:
+            print(f"Error in get_related_conditions: {str(e)}")
+            return []
+        
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'MedicalKGExtractor/1.0 (research project)'
+        })
+        
+        # Cache for entity labels and descriptions
+        self.entity_metadata = {}
+        
         # Same medical properties as before
         self.medical_properties = {
             'P31': 'instance of',
